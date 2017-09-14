@@ -27,6 +27,8 @@ using ILogger = Serilog.ILogger;
 
 namespace ChocolateyGui.Subprocess
 {
+    using System.Reflection;
+
     [ServiceBehavior(InstanceContextMode = InstanceContextMode.PerCall, ConcurrencyMode = ConcurrencyMode.Multiple, IncludeExceptionDetailInFaults = true)]
     internal class ChocolateyService : IIpcChocolateyService
     {
@@ -390,9 +392,61 @@ namespace ChocolateyGui.Subprocess
             var operationContext = OperationContext.Current;
             using (await Lock.ReadLockAsync())
             {
-                var config = await GetConfigFile(operationContext);
-                return config.Sources.Select(Mapper.Map<ChocolateySource>).ToArray();
+                var configSettings = await GetConfigFile(operationContext);
+
+                return configSettings.Sources.Select(Mapper.Map<ChocolateySource>).ToArray();
+                //return FilterSources(configSettings.Sources).Select(Mapper.Map<ChocolateySource>).ToArray();
             }
+        }
+
+        private IEnumerable<ConfigFileSourceSetting> FilterSources(IEnumerable<ConfigFileSourceSetting> sources)
+        {
+            var config = Lets.GetChocolatey().GetConfiguration();
+            if (!config.Information.IsLicensedVersion)
+            {
+                return sources;
+            }
+
+            var licenseAssembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name.is_equal_to("chocolatey.licensed"));
+            if (licenseAssembly == null)
+            {
+                return sources;
+            }
+
+            var licensedMethod = licenseAssembly.GetType("chocolatey.licensed.infrastructure.app.utility.SourceUtility", throwOnError: false, ignoreCase: true);
+            if (licensedMethod == null)
+            {
+                return sources;
+            }
+
+            var filteredSources = new HashSet<ConfigFileSourceSetting>();
+
+            foreach (var source in sources.or_empty_list_if_null().ToList())
+            {
+                try
+                {
+                    var componentClass = Activator.CreateInstance(licensedMethod);
+
+                    var shouldSkip = (bool)licensedMethod.InvokeMember(
+                        "skip_source",
+                        BindingFlags.InvokeMethod,
+                        null,
+                        componentClass,
+                        new object[] { source, config });
+
+                    if (!shouldSkip)
+                    {
+                        filteredSources.Add(source);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Error attempting to filter source.");
+                    filteredSources.Add(source);
+                }
+            }
+
+            return filteredSources;
         }
 
         public async Task AddSource(ChocolateySource source)

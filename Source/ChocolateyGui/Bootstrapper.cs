@@ -101,6 +101,14 @@ namespace ChocolateyGui
                 // Do not remove! Load Chocolatey once so all config gets set
                 // properly for future calls
                 var choco = Lets.GetChocolatey();
+                
+                //.SetCustomLogging(new SerilogLogger(Logger)).Set(c =>
+                //{
+                //    c.Debug = true;
+                //    c.Verbose = true;
+                //});
+
+                var config = choco.GetConfiguration();
 
                 var packageService = Container.Resolve<IChocolateyPackageService>();
                 var features = await packageService.GetFeatures();
