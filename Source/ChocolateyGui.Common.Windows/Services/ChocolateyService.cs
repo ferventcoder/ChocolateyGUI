@@ -15,6 +15,7 @@ using chocolatey.infrastructure.app.configuration;
 using chocolatey.infrastructure.app.domain;
 using chocolatey.infrastructure.app.nuget;
 using chocolatey.infrastructure.app.services;
+using chocolatey.infrastructure.configuration;
 using chocolatey.infrastructure.results;
 using chocolatey.infrastructure.services;
 using ChocolateyGui.Common.Models;
@@ -53,7 +54,7 @@ namespace ChocolateyGui.Common.Windows.Services
             _xmlService = xmlService;
             _fileSystem = fileSystem;
             _configService = configService;
-            _choco = Lets.GetChocolatey().SetCustomLogging(new SerilogLogger(Logger, _progressService));
+            _choco = PrepareChocolateyApi(new SerilogLogger(Logger, _progressService));
 
             _localAppDataPath = _fileSystem.combine_paths(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify), "Chocolatey GUI");
         }
@@ -118,7 +119,7 @@ namespace ChocolateyGui.Common.Windows.Services
             }
             else
             {
-                var choco = Lets.GetChocolatey();
+                var choco = Lets.GetChocolatey(initializeLogging: false);
                 choco.Set(
                     config =>
                     {
@@ -169,8 +170,8 @@ namespace ChocolateyGui.Common.Windows.Services
         {
             using (await Lock.WriteLockAsync())
             {
-                var logger = new SerilogLogger(Logger, _progressService);
-                var choco = Lets.GetChocolatey().SetCustomLogging(logger);
+                var serilogLogger = new SerilogLogger(Logger, _progressService);
+                var choco = PrepareChocolateyApi(serilogLogger);
                 choco.Set(
                     config =>
                         {
@@ -192,12 +193,18 @@ namespace ChocolateyGui.Common.Windows.Services
                             {
                                 config.Force = true;
                             }
+
+                            config.RegularOutput = true;
+                            config.QuietOutput = false;
+                            config.Verbose = true;
+                            config.Trace = true;
+                            config.Debug = true;
                         });
 
-                Action<LogMessage> grabErrors;
+                Action<Models.LogMessage> grabErrors;
                 var errors = GetErrors(out grabErrors);
 
-                using (logger.Intercept(grabErrors))
+                using (serilogLogger.Intercept(grabErrors))
                 {
                     await choco.RunAsync();
 
@@ -234,6 +241,7 @@ namespace ChocolateyGui.Common.Windows.Services
                         {
                             config.Sources = options.Source;
                         }
+
 #if !DEBUG
                         config.Verbose = false;
 #endif // DEBUG
@@ -282,8 +290,8 @@ namespace ChocolateyGui.Common.Windows.Services
         {
             using (await Lock.WriteLockAsync())
             {
-                var logger = new SerilogLogger(Logger, _progressService);
-                var choco = Lets.GetChocolatey().SetCustomLogging(logger);
+                var serilogLogger = new SerilogLogger(Logger, _progressService);
+                var choco = PrepareChocolateyApi(serilogLogger);
                 choco.Set(
                     config =>
                         {
@@ -295,9 +303,13 @@ namespace ChocolateyGui.Common.Windows.Services
                             {
                                 config.Version = version.ToString();
                             }
+
+                            config.Verbose = true;
+                            config.Trace = true;
+                            config.Debug = true;
                         });
 
-                return await RunCommand(choco, logger);
+                return await RunCommand(choco, serilogLogger);
             }
         }
 
@@ -305,17 +317,22 @@ namespace ChocolateyGui.Common.Windows.Services
         {
             using (await Lock.WriteLockAsync())
             {
-                var logger = new SerilogLogger(Logger, _progressService);
-                var choco = Lets.GetChocolatey().SetCustomLogging(logger);
+                var serilogLogger = new SerilogLogger(Logger, _progressService);
+                var choco = PrepareChocolateyApi(serilogLogger);
                 choco.Set(
                     config =>
                         {
                             config.CommandName = CommandNameType.upgrade.ToString();
                             config.PackageNames = id;
                             config.Features.UsePackageExitCodes = false;
+
+                            config.Verbose = true;
+                            config.Trace = true;
+
+                            config.Debug = true;
                         });
 
-                return await RunCommand(choco, logger);
+                return await RunCommand(choco, serilogLogger);
             }
         }
 
@@ -556,7 +573,7 @@ namespace ChocolateyGui.Common.Windows.Services
             return mappedPackage;
         }
 
-        private static List<string> GetErrors(out Action<LogMessage> grabErrors)
+        private static List<string> GetErrors(out Action<Models.LogMessage> grabErrors)
         {
             var errors = new List<string>();
             grabErrors = m =>
@@ -573,9 +590,20 @@ namespace ChocolateyGui.Common.Windows.Services
             return errors;
         }
 
+        private static GetChocolatey PrepareChocolateyApi(SerilogLogger logger)
+        {
+            var choco = Lets.GetChocolatey(initializeLogging: false).SetCustomLogging(logger, logExistingMessages: false, addToExistingLoggers: true);
+
+            // TODO: RR/GP - why do we call this? We needed something to initialize
+            // Research if we can pull this out
+            var config = Config.get_configuration_settings();
+
+            return choco;
+        }
+
         private async Task<PackageOperationResult> RunCommand(GetChocolatey choco, SerilogLogger logger)
         {
-            Action<LogMessage> grabErrors;
+            Action<Models.LogMessage> grabErrors;
             var errors = GetErrors(out grabErrors);
 
             using (logger.Intercept(grabErrors))

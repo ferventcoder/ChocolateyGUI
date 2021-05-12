@@ -114,7 +114,10 @@ namespace ChocolateyGui.Common.Windows
             {
                 // Do not remove! Load Chocolatey once so all config gets set
                 // properly for future calls
-                var choco = Lets.GetChocolatey();
+                var choco = Lets.GetChocolatey(initializeLogging: true)
+                                            .TurnOnDebugLoggingLog4Net()
+                                            .TurnOnVerboseLoggingLog4Net()
+                                            .TurnOnTraceLoggingLog4Net();
 
                 Mapper.Initialize(config =>
                 {
